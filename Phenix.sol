@@ -17,7 +17,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
     using SafeMath for uint256;
     using SafeMathInt for int256;
 
-    event LogRebase(uint256 indexed epoch, uint256 totalSupply);
+    event Rebase(uint256 indexed epoch, uint256 totalSupply);
 
     InterfaceLP public pairContract;
 
@@ -51,6 +51,13 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
     uint256 public sellFee = 5;
     uint256 public totalFee = liquidityFee.add(phenixVaultFee);
     uint256 public feeDenominator = 100;
+
+    uint256 public lastRebaseTimestamp = block.timestamp;
+    int256 public lastRebaseDelta = 0;
+    uint256 public rebaseInterval = 86400;
+    uint256 public rebasePercentDelta = 1; // 1.000 percent
+    uint256 public rebaseDenominator = 100;
+
 
     address DEAD = 0x000000000000000000000000000000000000dEaD;
     address ZERO = 0x0000000000000000000000000000000000000000;
@@ -115,14 +122,29 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         blacklist[_user] = _flag;
     }
 
-    function rebase(uint256 epoch, int256 supplyDelta)
+
+    function calculateNextRebase() 
+        public
+        view
+        returns (int256)
+    {
+        uint256 value = _totalSupply;
+        // calculate percentage based on last rebase
+        uint256 currentTimestamp = block.timestamp;
+        uint256 rebaseTimestampDelta = currentTimestamp - lastRebaseTimestamp;
+        return int256(value.mul(rebasePercentDelta).div(rebaseDenominator));
+    }
+
+    function rebase(uint256 epoch)
         external
         onlyOwner
         returns (uint256)
     {
+        int256 supplyDelta = calculateNextRebase();
+
         require(!inSwap, "Try again");
         if (supplyDelta == 0) {
-            emit LogRebase(epoch, _totalSupply);
+            emit Rebase(epoch, _totalSupply);
             return _totalSupply;
         }
 
@@ -139,7 +161,10 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         _gonsPerFragment = TOTAL_GONS.div(_totalSupply);
         pairContract.sync();
 
-        emit LogRebase(epoch, _totalSupply);
+        lastRebaseDelta = supplyDelta;
+        lastRebaseTimestamp = block.timestamp;
+
+        emit Rebase(epoch, _totalSupply);
         return _totalSupply;
     }
 
