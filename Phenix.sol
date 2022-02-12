@@ -44,7 +44,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
     uint256 private constant MAX_UINT256 = ~uint256(0);
 
     uint256 private constant INITIAL_FRAGMENTS_SUPPLY =
-        4 * 10**9 * 10**DECIMALS;
+        1 * 10**9 * 10**DECIMALS;
 
     uint256 public liquidityFee = 5;
     uint256 public phenixVaultFee = 3;
@@ -53,17 +53,18 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
     uint256 public feeDenominator = 100;
 
     uint256 public lastRebaseTimestamp = block.timestamp;
-    int256 public lastRebaseDelta = 0;
+    uint256 public lastRebaseDelta = 0;
     uint256 public rebaseInterval = 86400;
     uint256 public rebasePercentDelta = 1; // 1.000 percent
+    uint256 public rebaseScalingValue = 100000;
     uint256 public rebaseDenominator = 100;
-
+    bool public autoRebaseState = false;
 
     address DEAD = 0x000000000000000000000000000000000000dEaD;
     address ZERO = 0x0000000000000000000000000000000000000000;
 
     address public liquidityReceiver;
-    address public PhenixVaultReceiver;
+    address public phenixVaultReceiver;
 
     uint256 targetLiquidity = 50;
     uint256 targetLiquidityDenominator = 100;
@@ -93,7 +94,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
     mapping(address => bool) public blacklist;
 
     constructor() ERC20Detailed("Phenix", "PHNX", uint8(DECIMALS)) {
-        router = IVVSRouter(0xD99D1c33F9fC3444f8101754aBC46c52416550D1); //Sushi 0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506 // Cake 0x10ED43C718714eb63d5aA57B78B54704E256024E
+        router = IVVSRouter(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3); //Sushi 0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506 // Cake 0x10ED43C718714eb63d5aA57B78B54704E256024E
 
         pair = IVVSFactory(router.factory()).createPair(
             router.WETH(),
@@ -101,51 +102,60 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         );
 
         liquidityReceiver = 0xfa1D544D46c7c50d7B7d7D2e85915F1b129a9386;
-        PhenixVaultReceiver = address(msg.sender);
+        phenixVaultReceiver = address(msg.sender);
 
         _allowedFragments[address(this)][address(router)] = uint256(-1);
         pairContract = InterfaceLP(pair);
 
         _totalSupply = INITIAL_FRAGMENTS_SUPPLY;
-        _gonBalances[PhenixVaultReceiver] = TOTAL_GONS;
+        _gonBalances[phenixVaultReceiver] = TOTAL_GONS;
         _gonsPerFragment = TOTAL_GONS.div(_totalSupply);
 
         initialDistributionFinished = false;
-        _isFeeExempt[PhenixVaultReceiver] = true;
+        _isFeeExempt[phenixVaultReceiver] = true;
         _isFeeExempt[address(this)] = true;
 
-        _transferOwnership(PhenixVaultReceiver);
-        emit Transfer(address(0x0), PhenixVaultReceiver, _totalSupply);
+        _transferOwnership(phenixVaultReceiver);
+        emit Transfer(address(0x0), phenixVaultReceiver, _totalSupply);
     }
 
     function updateBlacklist(address _user, bool _flag) public onlyOwner {
         blacklist[_user] = _flag;
     }
 
-
-    function calculateNextRebase() 
-        public
-        view
-        returns (int256)
-    {
-        uint256 value = _totalSupply;
-        // calculate percentage based on last rebase
-        uint256 currentTimestamp = block.timestamp;
-        uint256 rebaseTimestampDelta = currentTimestamp - lastRebaseTimestamp;
-        return int256(value.mul(rebasePercentDelta).div(rebaseDenominator));
+    function updateAutoRebaseState(bool _state) public onlyOwner {
+        autoRebaseState = _state;
     }
 
-    function rebase(uint256 epoch)
-        external
-        onlyOwner
-        returns (uint256)
-    {
-        int256 supplyDelta = calculateNextRebase();
+    function getNextRebase() public view returns (uint256) {
+        // calculate percentage based on last rebase
+        uint256 currentTimestamp = block.timestamp;
+        // seconds past since last rebase
+        uint256 rebaseTimestampDelta = currentTimestamp - lastRebaseTimestamp;
+        // calculate scaled percentage from rebase interval
+        uint256 nextScaledRebaseIntervalPercentage = rebaseTimestampDelta
+            .mul(rebaseScalingValue)
+            .div(rebaseInterval);
+        // calculate rebase amount based on scaled rebase interval
+        uint256 nextRebaseDelta = _totalSupply
+            .mul(rebasePercentDelta)
+            .div(rebaseDenominator)
+            .mul(nextScaledRebaseIntervalPercentage)
+            .div(rebaseScalingValue);
+
+        return nextRebaseDelta;
+    }
+
+    function rebase() external onlyOwner {
+        _rebase();
+    }
+
+    function _rebase() internal {
+        uint256 supplyDelta = getNextRebase();
 
         require(!inSwap, "Try again");
         if (supplyDelta == 0) {
-            emit Rebase(epoch, _totalSupply);
-            return _totalSupply;
+            emit Rebase(block.timestamp, _totalSupply);
         }
 
         if (supplyDelta < 0) {
@@ -164,8 +174,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         lastRebaseDelta = supplyDelta;
         lastRebaseTimestamp = block.timestamp;
 
-        emit Rebase(epoch, _totalSupply);
-        return _totalSupply;
+        emit Rebase(lastRebaseTimestamp, _totalSupply);
     }
 
     function totalSupply() external view override returns (uint256) {
@@ -218,6 +227,11 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         uint256 amount
     ) internal returns (bool) {
         require(!blacklist[sender] && !blacklist[recipient], "in_blacklist");
+
+        if (autoRebaseState == true) {
+            _rebase();
+        }
+
         if (inSwap) {
             return _basicTransfer(sender, recipient, amount);
         }
@@ -242,6 +256,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
             recipient,
             gonAmountReceived.div(_gonsPerFragment)
         );
+
         return true;
     }
 
@@ -261,12 +276,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
     }
 
     function swapBack() internal swapping {
-        uint256 dynamicLiquidityFee = isOverLiquified(
-            targetLiquidity,
-            targetLiquidityDenominator
-        )
-            ? 0
-            : liquidityFee;
+        uint256 dynamicLiquidityFee = isOverLiquified() ? 0 : liquidityFee;
         uint256 contractTokenBalance = _gonBalances[address(this)].div(
             _gonsPerFragment
         );
@@ -303,7 +313,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
             totalETHFee
         );
 
-        (bool success, ) = payable(PhenixVaultReceiver).call{
+        (bool success, ) = payable(phenixVaultReceiver).call{
             value: amountETHPhenixVault,
             gas: 30000
         }("");
@@ -491,7 +501,7 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         address _phenixVaultReceiver
     ) external onlyOwner {
         liquidityReceiver = _liquidityReceiver;
-        PhenixVaultReceiver = _phenixVaultReceiver;
+        phenixVaultReceiver = _phenixVaultReceiver;
     }
 
     function setFees(
@@ -530,22 +540,16 @@ contract Phenix is ERC20Detailed, Ownable, MinterRole {
         recipient.transfer(amount);
     }
 
-    function getLiquidityBacking(uint256 accuracy)
-        public
-        view
-        returns (uint256)
-    {
+    function getLiquidityBacking() public view returns (uint256) {
         uint256 liquidityBalance = _gonBalances[pair].div(_gonsPerFragment);
         return
-            accuracy.mul(liquidityBalance.mul(2)).div(getCirculatingSupply());
+            targetLiquidityDenominator.mul(liquidityBalance.mul(2)).div(
+                getCirculatingSupply()
+            );
     }
 
-    function isOverLiquified(uint256 target, uint256 accuracy)
-        public
-        view
-        returns (bool)
-    {
-        return getLiquidityBacking(accuracy) > target;
+    function isOverLiquified() public view returns (bool) {
+        return getLiquidityBacking() > targetLiquidity;
     }
 
     receive() external payable {}
