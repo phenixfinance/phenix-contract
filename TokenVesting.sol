@@ -46,7 +46,7 @@ contract PhenixTokenVesting is Ownable {
         buyBackPercentageDenominator = 100;
         buyBackAllocation = 0;
 
-        router = IVVSRouter(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+        router = IVVSRouter(0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae);
 
         _transferOwnership(_owner);
     }

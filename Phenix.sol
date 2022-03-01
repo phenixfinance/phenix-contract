@@ -41,7 +41,7 @@ contract Phenix is ERC20Detailed, Ownable {
 
     uint256 public liquidityFee = 5;
     uint256 public phenixVaultFee = 8;
-    uint256 public sellFee = 0;
+    uint256 public sellFee = 2;
     uint256 public totalFee = liquidityFee.add(phenixVaultFee);
     uint256 public feeDenominator = 100;
 
@@ -70,7 +70,7 @@ contract Phenix is ERC20Detailed, Ownable {
     mapping(address => mapping(address => uint256)) private _allowedFragments;
 
     constructor() ERC20Detailed("Phenix", "PHNX", uint8(DECIMALS)) {
-        router = IVVSRouter(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+        router = IVVSRouter(0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae);
 
         pair = IVVSFactory(router.factory()).createPair(
             router.WETH(),
