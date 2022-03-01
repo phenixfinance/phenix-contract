@@ -34,7 +34,7 @@ contract PhenixTokenVesting is Ownable {
         tokenAddress = _tokenAddress;
         pairAddress = _pairAddress;
         unlockTimestamp = block.timestamp;
-        authorizedReceiver[msg.sender] = true;
+        authorizedReceiver[_owner] = true;
 
         burnLimitPercentage = 1;
         burnLimitDenominator = 100;
@@ -126,12 +126,9 @@ contract PhenixTokenVesting is Ownable {
         path[1] = address(tokenAddress);
         uint256 deadline = block.timestamp + 60;
 
-        uint256[] amountsOut = swapExactETHForTokensSupportingFeeOnTransferTokens(
-                0,
-                path,
-                address(this),
-                deadline
-            );
+        uint256[] memory amountsOut = router.swapExactETHForTokens{
+            value: _amountEth
+        }(0, path, address(this), deadline);
 
         IERC20(tokenAddress).transfer(BURN_ADDRESS, amountsOut[1]);
         totalTokensBurned = totalTokensBurned.add(amountsOut[1]);
