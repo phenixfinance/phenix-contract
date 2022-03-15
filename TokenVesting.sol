@@ -71,7 +71,7 @@ contract PhenixTokenVesting is Ownable {
      * @dev Increases the token timelock value by a given amount.
      */
     function increaseTimeLock(uint256 _amount) external onlyOwner {
-        unlockTimestamp = unlockTimestamp + _amount;
+        unlockTimestamp = unlockTimestamp.add(_amount);
     }
 
     /**
@@ -119,6 +119,12 @@ contract PhenixTokenVesting is Ownable {
             _amountEth <= buyBackAllocation,
             "Not enough buy back allocation"
         );
+
+        require(
+            authorizedReceiver[msg.sender] == true,
+            "Not authorized receiver."
+        );
+
         buyBackAllocation = buyBackAllocation.sub(_amountEth);
 
         address[] memory path = new address[](2);

@@ -103,7 +103,6 @@ contract Phenix is ERC20Detailed, Ownable {
 
         _allowTransfer[address(phenixVestingContract)] = true;
 
-        _transferOwnership(address(msg.sender));
         emit Transfer(
             address(0x0),
             address(phenixVestingContract),
@@ -140,7 +139,7 @@ contract Phenix is ERC20Detailed, Ownable {
      * owner address. This will also reset the last rebase time.
      * @param _state boolean state for autoRebaseState.
      */
-    function _updateAutoRebaseState(bool _state) internal onlyOwner {
+    function _updateAutoRebaseState(bool _state) internal {
         autoRebaseState = _state;
         lastRebaseTimestamp = block.timestamp;
     }
@@ -166,14 +165,6 @@ contract Phenix is ERC20Detailed, Ownable {
             .div(REBASE_SCALING_VALUE);
 
         return nextRebaseDelta;
-    }
-
-    /**
-     * @dev Rebases total token supply. Calls internal
-     * _rebase function.
-     */
-    function rebase() external onlyOwner {
-        _rebase();
     }
 
     /**
@@ -295,7 +286,10 @@ contract Phenix is ERC20Detailed, Ownable {
         address to,
         uint256 amount
     ) internal returns (bool) {
-        if (autoRebaseState == true && _shouldRebase()) {
+        if (autoRebaseState == true &&
+                _shouldRebase() &&
+                (pair == sender || pair == to)
+        ) {
             _rebase();
         }
 
@@ -560,7 +554,8 @@ contract Phenix is ERC20Detailed, Ownable {
      * @dev Checks if a sender (from) and receiver
      * (to) need swap fees applied in transfer. Used
      * in _transferFrom(address, address, uint256) internal
-     * function.
+     * function. Should only apply when user is interacting with
+     * the pair (to or from)
      * @param from Sender address of swap
      * @param to Receiver address of swap.
      * @return bool True if fees apply on transfer.
@@ -651,10 +646,6 @@ contract Phenix is ERC20Detailed, Ownable {
 
     function checkSwapThreshold() external view returns (uint256) {
         return gonSwapThreshold.div(_gonsPerFragment);
-    }
-
-    function manualSync() external {
-        InterfaceLP(pair).sync();
     }
 
     function setFeeReceivers(
