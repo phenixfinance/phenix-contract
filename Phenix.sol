@@ -670,14 +670,6 @@ contract Phenix is ERC20Detailed, Ownable {
         require(totalFee < feeDenominator / 4);
     }
 
-    function rescueToken(address tokenAddress, uint256 tokens)
-        public
-        onlyOwner
-        returns (bool success)
-    {
-        return ERC20Detailed(tokenAddress).transfer(msg.sender, tokens);
-    }
-
     function getLiquidityBacking() public view returns (uint256) {
         uint256 liquidityBalance = _gonBalances[pair].div(_gonsPerFragment);
         return
