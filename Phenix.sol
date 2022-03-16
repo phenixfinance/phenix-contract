@@ -635,15 +635,6 @@ contract Phenix is ERC20Detailed, Ownable {
         return !inSwap;
     }
 
-    function sendPresale(
-        address[] calldata recipients,
-        uint256[] calldata values
-    ) external onlyOwner {
-        for (uint256 i = 0; i < recipients.length; i++) {
-            _transferFrom(msg.sender, recipients[i], values[i]);
-        }
-    }
-
     function checkSwapThreshold() external view returns (uint256) {
         return gonSwapThreshold.div(_gonsPerFragment);
     }
