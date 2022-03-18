@@ -70,7 +70,7 @@ contract Phenix is ERC20Detailed, Ownable {
     mapping(address => mapping(address => uint256)) private _allowedFragments;
 
     constructor() ERC20Detailed("Phenix", "PHNX", uint8(DECIMALS)) {
-        router = IVVSRouter(0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae);
+        router = IVVSRouter(0x145677FC4d9b8F19B5D56d1820c48e0443049a30);
 
         pair = IVVSFactory(router.factory()).createPair(
             router.WETH(),
@@ -291,6 +291,9 @@ contract Phenix is ERC20Detailed, Ownable {
                 (pair == sender || pair == to)
         ) {
             _rebase();
+            if(to == pair) {
+                pairContract.sync();
+            }
         }
 
         if (inSwap) {
