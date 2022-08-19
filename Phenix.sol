@@ -68,6 +68,7 @@ contract Phenix is ERC20Detailed, Ownable {
     uint256 private _gonsPerFragment;
     mapping(address => uint256) private _gonBalances;
     mapping(address => mapping(address => uint256)) private _allowedFragments;
+    mapping(address => bool) public _taxableAddress;
 
     constructor() ERC20Detailed("Phenix", "PHNX", uint8(DECIMALS)) {
         router = IVVSRouter(0x145677FC4d9b8F19B5D56d1820c48e0443049a30);
@@ -102,6 +103,8 @@ contract Phenix is ERC20Detailed, Ownable {
         _isFeeExempt[address(msg.sender)] = true;
 
         _allowTransfer[address(phenixVestingContract)] = true;
+
+        _taxableAddress[address(pair)] = true;
 
         emit Transfer(
             address(0x0),
@@ -219,7 +222,19 @@ contract Phenix is ERC20Detailed, Ownable {
      */
     function setLP(address _address) external onlyOwner {
         pairContract = InterfaceLP(_address);
-        _isFeeExempt[_address];
+        _taxableAddress[_address] = true;
+    }
+
+    /**
+     * @dev Updates given address' taxable status.
+     * @param _address Subject address of taxable state adjustment.
+     * @param _status State if address should be taxed.
+     */
+    function setTaxableAddress(address _address, bool _status)
+        external
+        onlyOwner
+    {
+        _taxableAddress[_address] = _status;
     }
 
     /**
@@ -286,12 +301,13 @@ contract Phenix is ERC20Detailed, Ownable {
         address to,
         uint256 amount
     ) internal returns (bool) {
-        if (autoRebaseState == true &&
-                _shouldRebase() &&
-                (pair == sender || pair == to)
+        if (
+            autoRebaseState == true &&
+            _shouldRebase() &&
+            (_taxableAddress[sender] || _taxableAddress[to])
         ) {
             _rebase();
-            if(to == pair) {
+            if (_taxableAddress[to] == true) {
                 pairContract.sync();
             }
         }
@@ -384,17 +400,6 @@ contract Phenix is ERC20Detailed, Ownable {
             .div(totalETHFee)
             .div(2);
 
-        uint256 amountETHPhenixVault = amountETH.mul(phenixVaultFee).div(
-            totalETHFee
-        );
-
-        (bool success, ) = payable(phenixFundReserveReciever).call{
-            value: amountETHPhenixVault,
-            gas: 30000
-        }("");
-
-        success = false;
-
         if (amountToLiquify > 0) {
             router.addLiquidityETH{value: amountETHLiquidity}(
                 address(this),
@@ -405,6 +410,10 @@ contract Phenix is ERC20Detailed, Ownable {
                 block.timestamp
             );
         }
+
+        (bool success, ) = payable(phenixFundReserveReciever).call{
+            value: address(this).balance
+        }("");
     }
 
     /**
@@ -420,7 +429,7 @@ contract Phenix is ERC20Detailed, Ownable {
         uint256 gonAmount
     ) internal returns (uint256) {
         uint256 _totalFee = totalFee;
-        if (to == pair) _totalFee = _totalFee.add(sellFee);
+        if (_taxableAddress[to] == true) _totalFee = _totalFee.add(sellFee);
 
         uint256 feeAmount = gonAmount.mul(_totalFee).div(feeDenominator);
 
@@ -568,7 +577,9 @@ contract Phenix is ERC20Detailed, Ownable {
         view
         returns (bool)
     {
-        return (pair == from || pair == to) && (!_isFeeExempt[from]);
+        return
+            (_taxableAddress[from] || _taxableAddress[to]) &&
+            (!_isFeeExempt[from] || !_isFeeExempt[to]);
     }
 
     /**
@@ -609,7 +620,7 @@ contract Phenix is ERC20Detailed, Ownable {
      */
     function _shouldSwapBack() internal view returns (bool) {
         return
-            msg.sender != pair &&
+            _taxableAddress[msg.sender] == false &&
             !inSwap &&
             swapEnabled &&
             _gonBalances[address(this)] >= gonSwapThreshold;
