@@ -50,8 +50,6 @@ contract PhenixFinance is ERC20Detailed, Ownable {
     uint256 public rebaseRX3MultiplierStep = (1 * FXP_BASE) / 1000;
 
     IVVSRouter public router;
-    address public pair;
-
     bool public swapEnabled = true;
     uint256 private gonSwapThreshold = (TOTAL_GONS * 10) / 10000;
     bool inSwap;
@@ -67,8 +65,8 @@ contract PhenixFinance is ERC20Detailed, Ownable {
     mapping(address => bool) public authorizedRebaseAddress;
 
     constructor() ERC20Detailed("Phenix Finance", "PHNX", uint8(DECIMALS)) {
-        // router = IVVSRouter(0x145677FC4d9b8F19B5D56d1820c48e0443049a30);   LIVE
-        router = IVVSRouter(0x2fFAa0794bf59cA14F268A7511cB6565D55ed40b); // CRONOS TESTNET
+        // router = IVVSRouter(0x145677FC4d9b8F19B5D56d1820c48e0443049a30);   LIVE (MMF Dex Router)
+        router = IVVSRouter(0x2fFAa0794bf59cA14F268A7511cB6565D55ed40b); // CRONOS TESTNET (PhotonSwap Router)
 
         address _pairAddress = address(
             IVVSFactory(router.factory()).createPair(
@@ -590,7 +588,7 @@ contract PhenixFinance is ERC20Detailed, Ownable {
     {
         return
             (taxableAddress[from] || taxableAddress[to]) &&
-            (!_isFeeExempt[from] || !_isFeeExempt[to]);
+            (!_isFeeExempt[from] && !_isFeeExempt[to]);
     }
 
     /**

@@ -9,11 +9,12 @@ async function main() {
     console.log(`[ ------- ${await phenixTokenContract.name()} (${await phenixTokenContract.symbol()}) Contract Information] ------- ]`);
     console.log(`[ > ] Address:`, phenixTokenContract.address);
     console.log(`[ > ] Router Address:`, await phenixTokenContract.router());
-    console.log(`[ > ] Pair Address:`, await phenixTokenContract.pairAddresses(0));
+    console.log(`[ > ] Pair Addresses:`, await phenixTokenContract.getLPAddresses());
     console.log(`[ > ] Owner Address:`, await phenixTokenContract.owner());
     console.log(`[ > ] Total Supply:`, ethers.utils.commify(ethers.utils.formatEther(await phenixTokenContract.totalSupply())), await phenixTokenContract.symbol());
     console.log(`[ > ] Since Last Rebase:`, DATE_NOW - parseInt(await (await phenixTokenContract.lastRebaseTimestamp()).toString()), 'seconds');
     console.log(`[ > ] Last Rebase Delta:`, ethers.utils.commify(ethers.utils.formatEther(await phenixTokenContract.lastRebaseDelta())), await phenixTokenContract.symbol());
+    console.log(`[ > ] Swapback Threshold:`, ethers.utils.commify(ethers.utils.formatEther(await phenixTokenContract.checkSwapThreshold())), 'PHNX');
 
     const nextRebase = parseInt(ethers.utils.formatEther(await phenixTokenContract.getNextRebase(DATE_NOW)));
     const nextRebaseDay = parseInt(ethers.utils.formatEther(await phenixTokenContract.getNextRebase(DATE_NOW + 86400))) - nextRebase;
@@ -29,6 +30,8 @@ async function main() {
     console.log(`[ > ] RX3 Multiplier (%):`, rx3Multiplier, "%");
     console.log(`[ > ] RX3 Multiplier Step (%):`, rx3MultiplierStep, "%")
     console.log(`[ > ] RX3 Multiplier Max (%):`, rx3MultiplierMax, "%")
+    const addy = "0x55DC352C9247ea5168687A26E219933f8bA7A493";
+    console.log(`[ > ] Is ${addy} Fee Exempt:`, await phenixTokenContract.checkFeeExempt(addy));
 }
 
 // We recommend this pattern to be able to use async/await everywhere
