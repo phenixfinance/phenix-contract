@@ -3,9 +3,10 @@ pragma solidity ^0.7.4;
 // SPDX-License-Identifier: MIT
 
 import "./ERC20Detailed.sol";
-import "./IERC20.sol";
 import "./IVVSFactory.sol";
 import "./IVVSRouter.sol";
+import "./ERC20Detailed.sol";
+import "./ERC20Detailed.sol";
 import "./Ownable.sol";
 import "./SafeMath.sol";
 import "./SafeMathInt.sol";
@@ -18,10 +19,11 @@ contract Phenix is ERC20Detailed, Ownable {
 
     event Rebase(uint256 indexed totalSupply);
 
-    address[] public pairAddresses;
+    InterfaceLP public pairContract;
     address public liquidityReceiver;
-    address public phenixFundReserveReceiver;
+    address public phenixFundReserveReciever;
     bool public initialDistributionFinished;
+    bool public autoRebaseState;
 
     PhenixTokenVesting private phenixVestingContract;
 
@@ -37,9 +39,9 @@ contract Phenix is ERC20Detailed, Ownable {
     uint256 private constant INITIAL_FRAGMENTS_SUPPLY =
         1 * 10**9 * 10**DECIMALS;
 
-    uint256 public liquidityFee = 2;
+    uint256 public liquidityFee = 5;
     uint256 public phenixVaultFee = 8;
-    uint256 public sellFee = 5;
+    uint256 public sellFee = 2;
     uint256 public totalFee = liquidityFee.add(phenixVaultFee);
     uint256 public feeDenominator = 100;
 
@@ -47,6 +49,7 @@ contract Phenix is ERC20Detailed, Ownable {
     uint256 public lastRebaseDelta = 0;
     uint256 public rebasePercentDelta = 18; // 1.8 percent
     uint256 public rebaseDenominator = 1000;
+    uint256 public minimumRebaseTimestampDelta = 60;
 
     uint256 targetLiquidity = 50;
     uint256 targetLiquidityDenominator = 100;
@@ -65,11 +68,10 @@ contract Phenix is ERC20Detailed, Ownable {
     uint256 private _gonsPerFragment;
     mapping(address => uint256) private _gonBalances;
     mapping(address => mapping(address => uint256)) private _allowedFragments;
-    mapping(address => bool) public taxableAddress;
-    mapping(address => bool) public authorizedRebaseAddress;
 
-    constructor() ERC20Detailed("Phenix Finance", "PHNX", uint8(DECIMALS)) {
-        router = IVVSRouter(0x145677FC4d9b8F19B5D56d1820c48e0443049a30);
+    constructor() ERC20Detailed("Phenix", "PHNX", uint8(DECIMALS)) {
+        // router = IVVSRouter(0x145677FC4d9b8F19B5D56d1820c48e0443049a30);
+        router = IVVSRouter(0x2fFAa0794bf59cA14F268A7511cB6565D55ed40b); // CRONOS TESTNET
 
         pair = IVVSFactory(router.factory()).createPair(
             router.WETH(),
@@ -83,32 +85,26 @@ contract Phenix is ERC20Detailed, Ownable {
         );
 
         liquidityReceiver = address(phenixVestingContract);
-        phenixFundReserveReceiver = address(phenixVestingContract);
+        phenixFundReserveReciever = address(phenixVestingContract);
 
         _allowedFragments[address(this)][address(router)] = uint256(-1);
+        pairContract = InterfaceLP(pair);
 
         _totalSupply = INITIAL_FRAGMENTS_SUPPLY;
-        _gonBalances[address(phenixVestingContract)] = TOTAL_GONS;
+        _gonBalances[address(msg.sender)] = TOTAL_GONS;
         _gonsPerFragment = TOTAL_GONS.div(_totalSupply);
 
         initialDistributionFinished = false;
+        autoRebaseState = false;
 
-        _isFeeExempt[address(phenixFundReserveReceiver)] = true;
+        _isFeeExempt[address(phenixFundReserveReciever)] = true;
         _isFeeExempt[address(phenixVestingContract)] = true;
         _isFeeExempt[address(this)] = true;
         _isFeeExempt[address(msg.sender)] = true;
 
-        _allowTransfer[address(phenixVestingContract)] = true;
+        _allowTransfer[address(msg.sender)] = true;
 
-        taxableAddress[address(pair)] = true;
-        pairAddresses.push(address(pair));
-        authorizedRebaseAddress[address(msg.sender)] = true;
-
-        emit Transfer(
-            address(0x0),
-            address(phenixVestingContract),
-            _totalSupply
-        );
+        emit Transfer(address(0x0), address(msg.sender), _totalSupply);
     }
 
     /**
@@ -125,8 +121,7 @@ contract Phenix is ERC20Detailed, Ownable {
         require(
             initialDistributionFinished ||
                 isOwner() ||
-                _allowTransfer[msg.sender],
-            "Initial distirbution not finalized."
+                _allowTransfer[msg.sender]
         );
         _;
     }
@@ -137,7 +132,18 @@ contract Phenix is ERC20Detailed, Ownable {
     }
 
     /**
-     * @dev Returns the delta of the next rebase.
+     * @dev Updates the autoRebaseState state. Only callable by
+     * owner address. This will also reset the last rebase time.
+     * @param _state boolean state for autoRebaseState.
+     */
+    function _updateAutoRebaseState(bool _state) internal {
+        autoRebaseState = _state;
+        lastRebaseTimestamp = block.timestamp;
+    }
+
+    /**
+     * @dev Updates the autoRebaseState state. Only callable by
+     * owner address.
      * @return next rebase delta as uint256 value.
      */
     function getNextRebase() public view returns (uint256) {
@@ -179,23 +185,6 @@ contract Phenix is ERC20Detailed, Ownable {
     }
 
     /**
-     * @dev Executes the internal _rebase() function and then
-     * performs the sync() call on all applicable pairAddresses
-     */
-    function rebaseAndSync() external initialDistributionLock {
-        require(
-            authorizedRebaseAddress[msg.sender] == true,
-            "Not authroized to execute rebase"
-        );
-
-        _rebase();
-
-        for (uint256 i = 0; i < pairAddresses.length; i++) {
-            InterfaceLP(pairAddresses[i]).sync();
-        }
-    }
-
-    /**
      * @dev Returns total token supply. Overrides ERC-20
      * totalSupply() function to return elastic supply.
      */
@@ -221,41 +210,13 @@ contract Phenix is ERC20Detailed, Ownable {
     }
 
     /**
-     * @dev Adds LP contract address and removes
-     * fees from the given address. Added pair contract tested
-     * sync() before adding to see if it is a pair address.
-     * Addition will fail if sync() fails.
+     * @dev Updates LP contract address and removes
+     * fees from the given address.
      * @param _address Update LP contract address.
      */
-    function addLPAddress(address _address) external onlyOwner {
-        InterfaceLP(_address).sync();
-
-        pairAddresses.push(_address);
-        taxableAddress[_address] = true;
-    }
-
-    /**
-     * @dev Updates given address' taxable status.
-     * @param _address Subject address of taxable state adjustment.
-     * @param _status State if address should be taxed.
-     */
-    function setTaxableAddress(address _address, bool _status)
-        external
-        onlyOwner
-    {
-        taxableAddress[_address] = _status;
-    }
-
-    /**
-     * @dev Updates given address' Authorized Rebase status.
-     * @param _address Subject address of Authorized Rebase state adjustment.
-     * @param _status State if address should be allowed call rebaseAndSync().
-     */
-    function setAuthorizedRebaseAddress(address _address, bool _status)
-        external
-        onlyOwner
-    {
-        authorizedRebaseAddress[_address] = _status;
+    function setLP(address _address) external onlyOwner {
+        pairContract = InterfaceLP(_address);
+        _isFeeExempt[_address];
     }
 
     /**
@@ -322,6 +283,17 @@ contract Phenix is ERC20Detailed, Ownable {
         address to,
         uint256 amount
     ) internal returns (bool) {
+        if (
+            autoRebaseState == true &&
+            _shouldRebase() &&
+            (pair == sender || pair == to)
+        ) {
+            _rebase();
+            if (to == pair) {
+                pairContract.sync();
+            }
+        }
+
         if (inSwap) {
             return _basicTransfer(sender, to, amount);
         }
@@ -373,14 +345,16 @@ contract Phenix is ERC20Detailed, Ownable {
     /**
      * @dev Executes fee allocations and distributes tokens
      * to contract address, phenix vault receiver address, and
-     * liquidity receiver address.
+     * liquidity receiver address. Does not liquify tokens if
+     * over-liquified (determined by isOverLiquified() function).
      */
     function _swapBack() internal noReentrancy {
+        uint256 dynamicLiquidityFee = isOverLiquified() ? 0 : liquidityFee;
         uint256 contractTokenBalance = _gonBalances[address(this)].div(
             _gonsPerFragment
         );
         uint256 amountToLiquify = contractTokenBalance
-            .mul(liquidityFee)
+            .mul(dynamicLiquidityFee)
             .div(totalFee)
             .div(2);
         uint256 amountToSwap = contractTokenBalance.sub(amountToLiquify);
@@ -400,12 +374,24 @@ contract Phenix is ERC20Detailed, Ownable {
         );
 
         uint256 amountETH = address(this).balance.sub(balanceBefore);
-        uint256 totalETHFee = totalFee.sub(liquidityFee.div(2));
+
+        uint256 totalETHFee = totalFee.sub(dynamicLiquidityFee.div(2));
 
         uint256 amountETHLiquidity = amountETH
-            .mul(liquidityFee)
+            .mul(dynamicLiquidityFee)
             .div(totalETHFee)
             .div(2);
+
+        uint256 amountETHPhenixVault = amountETH.mul(phenixVaultFee).div(
+            totalETHFee
+        );
+
+        (bool success, ) = payable(phenixFundReserveReciever).call{
+            value: amountETHPhenixVault,
+            gas: 30000
+        }("");
+
+        success = false;
 
         if (amountToLiquify > 0) {
             router.addLiquidityETH{value: amountETHLiquidity}(
@@ -417,10 +403,6 @@ contract Phenix is ERC20Detailed, Ownable {
                 block.timestamp
             );
         }
-
-        (bool success, ) = payable(phenixFundReserveReceiver).call{
-            value: address(this).balance
-        }("");
     }
 
     /**
@@ -436,7 +418,7 @@ contract Phenix is ERC20Detailed, Ownable {
         uint256 gonAmount
     ) internal returns (uint256) {
         uint256 _totalFee = totalFee;
-        if (taxableAddress[to] == true) _totalFee = _totalFee.add(sellFee);
+        if (to == pair) _totalFee = _totalFee.add(sellFee);
 
         uint256 feeAmount = gonAmount.mul(_totalFee).div(feeDenominator);
 
@@ -559,6 +541,17 @@ contract Phenix is ERC20Detailed, Ownable {
     }
 
     /**
+     * @dev Checks if a token supply rebase is ready to
+     * execute. Function utilized in _transferFrom(address,
+     * address, uint256) internal function.
+     * @return bool True if rebase can execute.
+     */
+    function _shouldRebase() internal view returns (bool) {
+        return (uint256(block.timestamp).sub(lastRebaseTimestamp) >
+            minimumRebaseTimestampDelta);
+    }
+
+    /**
      * @dev Checks if a sender (from) and receiver
      * (to) need swap fees applied in transfer. Used
      * in _transferFrom(address, address, uint256) internal
@@ -573,9 +566,7 @@ contract Phenix is ERC20Detailed, Ownable {
         view
         returns (bool)
     {
-        return
-            (taxableAddress[from] || taxableAddress[to]) &&
-            (!_isFeeExempt[from] || !_isFeeExempt[to]);
+        return (pair == from || pair == to) && (!_isFeeExempt[from]);
     }
 
     /**
@@ -594,15 +585,18 @@ contract Phenix is ERC20Detailed, Ownable {
     }
 
     /**
-     * @dev Configures Rebase settings. Sets
+     * @dev Configures Rebase settings. Set AutoRebaseState,
      * RebasePercentDelta, and Accuracy.
+     * @param _autoRebaseState True if rebase on each transfer
      * @param _percentage value of rebase percent delta based on a daily interval (18)
      * @param _accuracy defines the value of the rebase delta percentage demoninator (1000)
      */
-    function setRebaseSettings(uint256 _percentage, uint256 _accuracy)
-        external
-        onlyOwner
-    {
+    function setRebaseSettings(
+        bool _autoRebaseState,
+        uint256 _percentage,
+        uint256 _accuracy
+    ) external onlyOwner {
+        _updateAutoRebaseState(_autoRebaseState);
         rebasePercentDelta = _percentage;
         rebaseDenominator = _accuracy;
     }
@@ -613,7 +607,7 @@ contract Phenix is ERC20Detailed, Ownable {
      */
     function _shouldSwapBack() internal view returns (bool) {
         return
-            taxableAddress[msg.sender] == false &&
+            msg.sender != pair &&
             !inSwap &&
             swapEnabled &&
             _gonBalances[address(this)] >= gonSwapThreshold;
@@ -648,10 +642,10 @@ contract Phenix is ERC20Detailed, Ownable {
 
     function setFeeReceivers(
         address _liquidityReceiver,
-        address _phenixFundReserveReceiver
+        address _phenixFundReserveReciever
     ) external onlyOwner {
         liquidityReceiver = _liquidityReceiver;
-        phenixFundReserveReceiver = _phenixFundReserveReceiver;
+        phenixFundReserveReciever = _phenixFundReserveReciever;
     }
 
     function setFees(
@@ -668,23 +662,16 @@ contract Phenix is ERC20Detailed, Ownable {
         require(totalFee < feeDenominator / 4);
     }
 
-    function emergencyRecoverETH() external onlyOwner {
-        require(address(this).balance > 0, "No ETH to recover.");
-        (bool success, ) = address(msg.sender).call{
-            value: address(this).balance
-        }("");
-        require(success, "Failed to recover ETH.");
+    function getLiquidityBacking() public view returns (uint256) {
+        uint256 liquidityBalance = _gonBalances[pair].div(_gonsPerFragment);
+        return
+            targetLiquidityDenominator.mul(liquidityBalance.mul(2)).div(
+                getCirculatingSupply()
+            );
     }
 
-    function emergencyRecoverToken(address _tokenAddress) external onlyOwner {
-        require(
-            IERC20(_tokenAddress).balanceOf(address(this)) > 0,
-            "No tokens to recover."
-        );
-        IERC20(_tokenAddress).transfer(
-            msg.sender,
-            IERC20(_tokenAddress).balanceOf(address(this))
-        );
+    function isOverLiquified() public view returns (bool) {
+        return getLiquidityBacking() > targetLiquidity;
     }
 
     receive() external payable {}
