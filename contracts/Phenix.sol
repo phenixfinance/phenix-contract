@@ -32,7 +32,7 @@ contract PhenixFinance is ERC20Detailed, Ownable {
     address private constant ZERO = 0x0000000000000000000000000000000000000000;
     uint256 private constant REBASE_INTERVAL = 86400;
     uint256 private constant INITIAL_FRAGMENTS_SUPPLY =
-        1 * 10**9 * 10**DECIMALS;
+        360 * 10**6 * 10**DECIMALS;
 
     uint256 public liquidityFee = 2;
     uint256 public phenixVaultFee = 8;
