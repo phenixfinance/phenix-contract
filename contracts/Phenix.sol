@@ -191,6 +191,19 @@ contract PhenixFinance is ERC20Detailed, Ownable {
     }
 
     /**
+     * @dev Sets the last rebase time to the current block
+     * timestamp as means to reset the value.
+     */
+    function resetLastRebaseTimestamp() external {
+        require(
+            authorizedRebaseAddress[msg.sender] == true,
+            "Not authroized to execute this function."
+        );
+
+        lastRebaseTimestamp = block.timestamp;
+    }
+
+    /**
      * @dev Returns total token supply. Overrides ERC-20
      * totalSupply() function to return elastic supply.
      */
